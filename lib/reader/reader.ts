@@ -71,14 +71,13 @@ function clampSpeed(wordsPerMinute: number, fallback: number) {
 function splitAtAnchor(index: number, text: string): ReaderWord {
   const chars = Array.from(graphemes.segment(text), (part) => part.segment);
   const isLetter = (char: string) => /[\p{L}\p{N}]/u.test(char);
-  let start = chars.findIndex(isLetter);
-  let end = chars.length - 1 - [...chars].reverse().findIndex(isLetter);
-  if (start === -1) {
-    start = 0;
-    end = chars.length - 1;
-  }
+  // The Anchor must be a letter, so the letters are counted, not the characters.
+  const letterPositions = chars.flatMap((char, position) => (isLetter(char) ? [position] : []));
   // Around the first third of the letters, so the eye lands early in the Word.
-  const at = start + Math.floor((end - start) / 3);
+  const at =
+    letterPositions.length > 0
+      ? letterPositions[Math.floor((letterPositions.length - 1) / 3)]
+      : Math.floor((chars.length - 1) / 3);
   return {
     index,
     text,

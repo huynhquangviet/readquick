@@ -145,6 +145,24 @@ describe("Anchor letter", () => {
     expect(split("(a)")).toEqual({ before: "(", anchor: "a", after: ")" });
   });
 
+  it.each([
+    { word: "ab..cd..ef", before: "a", anchor: "b", after: "..cd..ef" },
+    { word: "U.S.A.", before: "", anchor: "U", after: ".S.A." },
+    { word: "twenty-one", before: "tw", anchor: "e", after: "nty-one" },
+  ])("picks a letter as the Anchor of $word when it has punctuation inside", ({ word, ...expected }) => {
+    expect(split(word)).toEqual(expected);
+  });
+
+  it("keeps the Anchor on a letter whatever separators a Word has inside it", () => {
+    const chunks = ["ab", "..", "cd", "!", "ef", "—", "gh"];
+    for (let count = 1; count <= chunks.length; count++) {
+      const word = chunks.slice(0, count).join("");
+      const { before, anchor, after } = split(word);
+      expect(anchor).toMatch(/[\p{L}\p{N}]/u);
+      expect(before + anchor + after).toBe(word);
+    }
+  });
+
   it("picks an Anchor letter for a Word with no letters", () => {
     expect(split("—")).toEqual({ before: "", anchor: "—", after: "" });
     expect(split("...")).toEqual({ before: "", anchor: ".", after: ".." });
