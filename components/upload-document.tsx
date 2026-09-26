@@ -24,7 +24,8 @@ export function UploadDocument() {
       const result = await response.json().catch(() => undefined);
       if (response.ok && result?.id) {
         // Stay in the loading state until the Document page takes over.
-        router.push(`/library/${result.id}`);
+        // A duplicate opens the Document the user already has, and says so there.
+        router.push(`/library/${result.id}${result.duplicate ? "?duplicate=1" : ""}`);
         return;
       }
       setError(result?.message ?? GENERIC_ERROR);

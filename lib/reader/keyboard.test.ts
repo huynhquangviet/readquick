@@ -12,8 +12,13 @@ describe("reader keyboard controls", () => {
     expect(readerKeyAction("ArrowRight")).toBe("forward");
   });
 
+  it("the up arrow makes Speed faster and the down arrow makes it slower", () => {
+    expect(readerKeyAction("ArrowUp")).toBe("faster");
+    expect(readerKeyAction("ArrowDown")).toBe("slower");
+  });
+
   it("ignores every other key", () => {
-    for (const key of ["a", "Enter", "ArrowUp", "ArrowDown", "Tab", "Escape"]) {
+    for (const key of ["a", "Enter", "Tab", "Escape"]) {
       expect(readerKeyAction(key)).toBeNull();
     }
   });

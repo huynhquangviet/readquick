@@ -48,9 +48,9 @@ export interface Reader {
   subscribe(listener: (event: ReaderEvent) => void): () => void;
 }
 
-const DEFAULT_SPEED = 250;
-const MIN_SPEED = 100;
-const MAX_SPEED = 800;
+export const DEFAULT_SPEED = 250;
+export const MIN_SPEED = 100;
+export const MAX_SPEED = 800;
 
 // Pause on punctuation: multipliers on the base duration.
 const CLAUSE_PAUSE = 1.5; // , ; :

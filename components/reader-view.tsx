@@ -3,11 +3,22 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useEffect, useState, type PointerEvent } from "react";
 
+import { useSettings } from "@/components/settings-provider";
 import { createHoldRepeat, type HoldRepeat } from "@/lib/reader/hold-repeat";
 import { readerKeyAction } from "@/lib/reader/keyboard";
+import { createPositionSaver } from "@/lib/reader/position-saver";
+import { createPositionWriter } from "@/lib/reader/position-store";
 import { positionAt, progressOf } from "@/lib/reader/progress";
-import { createReader, type Clock } from "@/lib/reader/reader";
+import { MAX_SPEED, MIN_SPEED, createReader, type Clock } from "@/lib/reader/reader";
 import { toReaderInput } from "@/lib/reader/stored-document";
+import {
+  FONT_STEP,
+  MAX_FONT_SIZE,
+  MIN_FONT_SIZE,
+  SPEED_STEP,
+  stepSpeed,
+} from "@/lib/settings/settings";
+import { createClient } from "@/lib/supabase/client";
 
 const browserClock: Clock = {
   now: () => performance.now(),
@@ -19,12 +30,13 @@ const browserClock: Clock = {
 // very long Word shrinks to fit instead of running off the screen.
 const LETTER_EM = 0.6;
 const WORD_WIDTH_CQW = 90;
-const BASE_FONT_REM = 3;
-
-// A field where Space and the arrows edit text. The progress bar is not one:
-// after a drag it keeps focus, and Space and the arrows must still work.
+// A field where Space and the arrows edit text, or a control that keeps the
+// arrows for itself (`data-reader-keys="off"`). The progress bar and Speed
+// slider are not: after a drag they keep focus, and Space and the arrows must
+// still work.
 function isTypingTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return false;
+  if (target.dataset.readerKeys === "off") return true;
   if (target instanceof HTMLInputElement && target.type === "range") return false;
   return target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
 }
@@ -81,23 +93,43 @@ function HoldButton({
 
 /**
  * Shows a Document one Word at a time at the Focus point. The screen is one
- * big button: a tap toggles pause and play. It starts paused. Below it are
- * Rewind and Forward, and a progress bar that can be dragged.
+ * big button: a tap toggles pause and play. It starts paused, at the Reading
+ * position the user left. Below it are Rewind and Forward, a progress bar that
+ * can be dragged, and the Speed and font size settings. The Reading position is
+ * saved when the user pauses and every few seconds while reading.
  */
 export function ReaderView({
+  documentId,
   body,
   sentenceStarts,
+  initialPosition,
 }: {
+  documentId: string;
   body: string;
   sentenceStarts: number[];
+  initialPosition: number;
 }) {
+  const { settings, update } = useSettings();
   const [{ reader, wordCount }] = useState(() => {
     const input = toReaderInput({ body, sentence_starts: sentenceStarts });
-    return { reader: createReader({ ...input, clock: browserClock }), wordCount: input.words.length };
+    return {
+      reader: createReader({
+        ...input,
+        clock: browserClock,
+        speed: settings.speed,
+        position: initialPosition,
+      }),
+      wordCount: input.words.length,
+    };
   });
   const [rewindHold] = useState(() => createHoldRepeat({ action: () => reader.rewind(), clock: browserClock }));
   const [forwardHold] = useState(() => createHoldRepeat({ action: () => reader.forward(), clock: browserClock }));
   const [, rerender] = useState(0);
+
+  // Speed can change while playing: from the slider, the arrow keys, or a saved value.
+  useEffect(() => {
+    reader.setSpeed(settings.speed);
+  }, [reader, settings.speed]);
 
   useEffect(() => {
     // The Reader may have been paused by an earlier cleanup (a hidden route
@@ -106,13 +138,20 @@ export function ReaderView({
     const stop = reader.subscribe((event) => {
       if (event.type !== "activity") rerender((n) => n + 1);
     });
+    const saver = createPositionSaver({
+      reader,
+      clock: browserClock,
+      save: createPositionWriter(createClient(), documentId),
+    });
     return () => {
       stop();
+      // Pausing saves the Reading position, so stop saving only after it.
       reader.pause();
+      saver.stop();
       rewindHold.stop();
       forwardHold.stop();
     };
-  }, [reader, rewindHold, forwardHold]);
+  }, [reader, rewindHold, forwardHold, documentId]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -132,7 +171,14 @@ export function ReaderView({
         if (reader.playing) reader.pause();
         else reader.play();
       } else if (action === "rewind") reader.rewind();
-      else reader.forward();
+      else if (action === "forward") reader.forward();
+      else {
+        // From the Reader's own Speed, which is current even when keys repeat
+        // faster than the screen redraws.
+        const speed = stepSpeed(reader.speed, action);
+        reader.setSpeed(speed);
+        update({ speed });
+      }
     }
     function onKeyUp(event: KeyboardEvent) {
       if (event.key === " " && !isTypingTarget(event.target))
@@ -144,11 +190,11 @@ export function ReaderView({
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
     };
-  }, [reader]);
+  }, [reader, update]);
 
   const { text } = reader.current;
   const letters = Math.max(Array.from(text).length, 1);
-  const fontSize = `min(${BASE_FONT_REM}rem, ${WORD_WIDTH_CQW / (LETTER_EM * letters)}cqw)`;
+  const fontSize = `min(${settings.fontSize}rem, ${WORD_WIDTH_CQW / (LETTER_EM * letters)}cqw)`;
 
   const hint = reader.ended
     ? "End of Document"
@@ -204,6 +250,40 @@ export function ReaderView({
         <HoldButton hold={forwardHold} label="Forward" className={stepClass}>
           <ChevronRight aria-hidden />
         </HoldButton>
+      </div>
+      <div className="flex flex-col gap-3">
+        <label className="flex items-center gap-4 text-sm">
+          <span className="w-24 shrink-0">Speed</span>
+          <input
+            type="range"
+            min={MIN_SPEED}
+            max={MAX_SPEED}
+            step={SPEED_STEP}
+            value={settings.speed}
+            onChange={(event) => update({ speed: event.currentTarget.valueAsNumber })}
+            aria-label="Speed"
+            aria-valuetext={`${settings.speed} words per minute`}
+            className="h-8 w-full cursor-pointer accent-foreground touch-manipulation"
+          />
+          <span className="w-16 shrink-0 text-right tabular-nums text-muted-foreground">
+            {settings.speed} wpm
+          </span>
+        </label>
+        <label className="flex items-center gap-4 text-sm">
+          <span className="w-24 shrink-0">Font size</span>
+          <input
+            type="range"
+            min={MIN_FONT_SIZE}
+            max={MAX_FONT_SIZE}
+            step={FONT_STEP}
+            value={settings.fontSize}
+            onChange={(event) => update({ fontSize: event.currentTarget.valueAsNumber })}
+            aria-label="Font size"
+            data-reader-keys="off"
+            className="h-8 w-full cursor-pointer accent-foreground touch-manipulation"
+          />
+          <span className="w-16 shrink-0" aria-hidden />
+        </label>
       </div>
     </div>
   );
