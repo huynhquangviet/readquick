@@ -22,7 +22,7 @@ async function Reader({
   const supabase = await createClient();
   const { data: row } = await supabase
     .from("documents")
-    .select("title, document_texts(body, sentence_starts), reading_positions(word_index)")
+    .select("title, document_texts(body, sentence_starts, chapters), reading_positions(word_index)")
     .eq("id", id)
     .maybeSingle();
   const text = firstRelated(row?.document_texts);
@@ -42,6 +42,7 @@ async function Reader({
         documentId={id}
         body={text.body}
         sentenceStarts={text.sentence_starts}
+        chapters={text.chapters}
         initialPosition={position?.word_index ?? 0}
       />
     </>

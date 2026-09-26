@@ -1,9 +1,13 @@
 "use client";
 
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { useEffect, useState, type PointerEvent } from "react";
+import { useEffect, useMemo, useState, type PointerEvent } from "react";
 
 import { useSettings } from "@/components/settings-provider";
+import { createActivityRecorder } from "@/lib/reader/activity-recorder";
+import { createActivityWriter } from "@/lib/reader/activity-store";
+import { pauseWhenHidden } from "@/lib/reader/auto-pause";
+import { currentChapter, parseChapters } from "@/lib/reader/chapters";
 import { createHoldRepeat, type HoldRepeat } from "@/lib/reader/hold-repeat";
 import { readerKeyAction } from "@/lib/reader/keyboard";
 import { createPositionSaver } from "@/lib/reader/position-saver";
@@ -102,11 +106,13 @@ export function ReaderView({
   documentId,
   body,
   sentenceStarts,
+  chapters: storedChapters,
   initialPosition,
 }: {
   documentId: string;
   body: string;
   sentenceStarts: number[];
+  chapters: unknown;
   initialPosition: number;
 }) {
   const { settings, update } = useSettings();
@@ -122,6 +128,8 @@ export function ReaderView({
       wordCount: input.words.length,
     };
   });
+  // A Document without Chapters (TXT) gets no list, not an unreliable one.
+  const chapters = useMemo(() => parseChapters(storedChapters, wordCount), [storedChapters, wordCount]);
   const [rewindHold] = useState(() => createHoldRepeat({ action: () => reader.rewind(), clock: browserClock }));
   const [forwardHold] = useState(() => createHoldRepeat({ action: () => reader.forward(), clock: browserClock }));
   const [, rerender] = useState(0);
@@ -138,16 +146,28 @@ export function ReaderView({
     const stop = reader.subscribe((event) => {
       if (event.type !== "activity") rerender((n) => n + 1);
     });
+    const supabase = createClient();
     const saver = createPositionSaver({
       reader,
       clock: browserClock,
-      save: createPositionWriter(createClient(), documentId),
+      save: createPositionWriter(supabase, documentId),
     });
+    const recorder = createActivityRecorder({
+      reader,
+      clock: browserClock,
+      wallNow: () => Date.now(),
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      record: createActivityWriter(supabase),
+    });
+    // Play time and Words read would overstate the reading if a hidden tab kept playing.
+    const stopAutoPause = pauseWhenHidden(reader, document);
     return () => {
       stop();
-      // Pausing saves the Reading position, so stop saving only after it.
+      stopAutoPause();
+      // Pausing saves the Reading position and the activity, so stop saving only after it.
       reader.pause();
       saver.stop();
+      recorder.stop();
       rewindHold.stop();
       forwardHold.stop();
     };
@@ -243,6 +263,31 @@ export function ReaderView({
         aria-valuetext={`Word ${reader.position + 1} of ${wordCount}`}
         className="h-8 w-full cursor-pointer accent-foreground touch-manipulation"
       />
+      {chapters.length > 0 && (
+        <label className="flex items-center gap-4 text-sm">
+          <span className="w-24 shrink-0">Chapter</span>
+          {/* The value stays empty, so choosing the Chapter the user is already in still jumps to its start. */}
+          <select
+            aria-label="Chapter"
+            value=""
+            onChange={(event) => {
+              reader.seek(chapters[Number(event.currentTarget.value)].wordIndex);
+              // The list would otherwise keep Space and the arrows for itself.
+              event.currentTarget.blur();
+            }}
+            className="h-10 min-w-0 flex-1 rounded-lg border bg-background px-2 touch-manipulation"
+          >
+            <option value="" disabled>
+              {currentChapter(chapters, reader.position)?.title ?? "Jump to a Chapter"}
+            </option>
+            {chapters.map((chapter, index) => (
+              <option key={index} value={index}>
+                {chapter.title}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <div className="flex gap-4">
         <HoldButton hold={rewindHold} label="Rewind" className={stepClass}>
           <ChevronLeft aria-hidden />
