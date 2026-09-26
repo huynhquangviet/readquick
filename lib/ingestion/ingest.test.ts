@@ -116,6 +116,17 @@ describe("Sentence detection", () => {
     expect(sentences("Say no. Go on. Do it")).toEqual(["Say no.", "Go on.", "Do it"]);
   });
 
+  it("ends a Sentence on a lone lower-case letter, such as a Vietnamese particle", () => {
+    expect(sentences("Vâng ạ. Thế à. Ừ")).toEqual(["Vâng ạ.", "Thế à.", "Ừ"]);
+  });
+
+  it("does not end a Sentence on a single capital initial", () => {
+    expect(sentences("J. K. Rowling wrote it. Fine")).toEqual([
+      "J. K. Rowling wrote it.",
+      "Fine",
+    ]);
+  });
+
   it("does not end a Sentence on common Vietnamese abbreviations", () => {
     expect(sentences("GS. Nguyễn ở TP. Hồ Chí Minh. Ông ấy đi làm.")).toEqual([
       "GS. Nguyễn ở TP. Hồ Chí Minh.",

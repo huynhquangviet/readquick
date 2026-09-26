@@ -12,8 +12,10 @@ const ABBREVIATIONS = new Set([
 
 const OPENERS = /^[\p{Ps}\p{Pi}"'“‘]+/u;
 const CLOSERS = /[\p{Pe}\p{Pf}"'”’]+$/u;
-// "J." and "e.g." and "U.S." and "Ph.D.", but not an ordinary short Word like "no."
-const DOTTED_ABBREVIATION = /^\p{L}\.$|^(\p{L}{1,2}\.){2,}$/u;
+// A capital initial like "J." (but not a lone lower-case letter, which can be a
+// whole Word: Vietnamese "ạ." or "à."), or a dotted abbreviation like "e.g.",
+// "U.S." and "Ph.D." (but not an ordinary short Word like "no.").
+const DOTTED_ABBREVIATION = /^\p{Lu}\.$|^(\p{L}{1,2}\.){2,}$/u;
 
 /** The Word without opening brackets or quotes in front, or closing ones behind. */
 export function withoutBrackets(word: string): string {

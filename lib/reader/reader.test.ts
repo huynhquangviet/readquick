@@ -582,6 +582,14 @@ describe("a busy clock", () => {
     expect(reader.position).toBe(20);
   });
 
+  it("shows each Word for its own time when the clock is later than a whole Word", () => {
+    const { clock, reader } = setup(["a", "b", "c", "d"], { speed: 600, lateBy: 250 });
+    reader.play();
+    clock.advance(600); // "a" was due at 100 ms but the clock only got to it at 350 ms
+    // "b" then gets its own 100 ms (due 450, seen at 700), not a zero-length showing.
+    expect(reader.position).toBe(1);
+  });
+
   it("does not lose played time to lateness", () => {
     const { clock, reader } = setup(["a", "b", "c"], { speed: 600, lateBy: 7 });
     const heard = listen(reader);
@@ -644,5 +652,50 @@ describe("a Speed that is not a number", () => {
   it("falls back to the default when the starting Speed is not a number", () => {
     const { reader } = setup(["a"], { speed: NaN });
     expect(reader.speed).toBe(250);
+  });
+});
+
+describe("a listener that pauses when the position changes", () => {
+  it("does not make the new Word skip its display time when played again", () => {
+    const { clock, reader } = setup(["a", "b", "c", "d"], { speed: 600 });
+    reader.subscribe((event) => {
+      if (event.type === "position") reader.pause();
+    });
+    reader.play();
+    clock.advance(100);
+    expect(reader.position).toBe(1);
+    expect(reader.playing).toBe(false);
+    reader.play();
+    clock.advance(99);
+    expect(reader.position).toBe(1);
+    clock.advance(1);
+    expect(reader.position).toBe(2);
+  });
+
+  it("does not count a Word as read when paused before it was shown", () => {
+    const { reader } = setup(["a", "b", "c", "d"], { sentenceStarts: [0, 2], speed: 600 });
+    reader.play();
+    const heard = listen(reader);
+    reader.subscribe((event) => {
+      if (event.type === "position") reader.pause();
+    });
+    reader.forward();
+    expect(reader.position).toBe(2);
+    expect(heard.wordsRead()).toBe(0);
+    reader.play();
+    expect(heard.wordsRead()).toBe(1);
+  });
+});
+
+describe("a listener that pauses when playback starts", () => {
+  it("leaves the Reader paused, with nothing left running", () => {
+    const { clock, reader } = setup(["a", "b", "c"], { speed: 600 });
+    reader.subscribe((event) => {
+      if (event.type === "playback" && event.playing) reader.pause();
+    });
+    reader.play();
+    expect(reader.playing).toBe(false);
+    clock.advance(10_000);
+    expect(reader.position).toBe(0);
   });
 });

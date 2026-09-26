@@ -139,21 +139,24 @@ export function createReader(options: ReaderOptions): Reader {
     emit({ type: "playback", playing, ended });
   }
 
-  // The current Word is on screen while playing: count it, once per showing.
-  function showWord(alreadyShownMs = 0) {
-    schedule(alreadyShownMs);
-    if (counted) return;
-    counted = true;
-    reportActivity(1);
-  }
-
   // Keeps the Word on screen for what the Speed gives it, less time it has had.
   function schedule(alreadyShownMs = 0) {
-    const duration = (60000 / speed) * displayMultiplier(words[position]);
+    const duration = displayDuration(position);
     shownAt = clock.now() - alreadyShownMs;
     // A Word already past its time (the Speed went up) is due now, not in the past.
     dueAt = Math.max(shownAt + duration, clock.now());
     timer = clock.setTimeout(advance, Math.max(0, duration - alreadyShownMs));
+  }
+
+  function displayDuration(index: number) {
+    return (60000 / speed) * displayMultiplier(words[index]);
+  }
+
+  // The current Word is on screen while playing: count it, once per showing.
+  function countWord() {
+    if (counted) return;
+    counted = true;
+    reportActivity(1);
   }
 
   function advance() {
@@ -165,8 +168,10 @@ export function createReader(options: ReaderOptions): Reader {
       return;
     }
     // A late timer must not push every later Word back: the next Word was
-    // due to start when this one was, so count the lateness towards it.
-    moveTo(position + 1, Math.max(0, clock.now() - dueAt));
+    // due to start when this one was, so count the lateness towards it. But a
+    // Word always gets its own display time, however late the clock was.
+    const lateBy = Math.max(0, clock.now() - dueAt);
+    moveTo(position + 1, lateBy < displayDuration(position + 1) ? lateBy : 0);
   }
 
   function moveTo(target: number, alreadyShownMs = 0) {
@@ -174,11 +179,13 @@ export function createReader(options: ReaderOptions): Reader {
     ended = false;
     counted = false;
     shownBeforePauseMs = 0;
-    emit({ type: "position", position });
     if (playing) {
       clock.clearTimeout(timer);
-      showWord(alreadyShownMs);
+      schedule(alreadyShownMs);
     }
+    // Listeners may pause or seek in response, so the timing is settled first.
+    emit({ type: "position", position });
+    if (playing) countWord();
   }
 
   function seek(index: number) {
@@ -216,8 +223,10 @@ export function createReader(options: ReaderOptions): Reader {
       if (playing || ended) return;
       playing = true;
       reportedAt = clock.now();
+      schedule(shownBeforePauseMs);
+      countWord();
+      // Last, so a listener that pauses in response finds everything settled.
       emitPlayback();
-      showWord(shownBeforePauseMs);
     },
     pause() {
       if (!playing) return;
