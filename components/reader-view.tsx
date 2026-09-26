@@ -11,10 +11,10 @@ const browserClock: Clock = {
   clearTimeout: (handle) => window.clearTimeout(handle as number),
 };
 
-// A letter is about 0.6em wide; a Word's longer side may use up to 44% of the
-// width, so a very long Word shrinks to fit instead of running off the screen.
+// A letter is about 0.6em wide; a Word may use up to 90% of the width, so a
+// very long Word shrinks to fit instead of running off the screen.
 const LETTER_EM = 0.6;
-const SIDE_WIDTH_CQW = 44;
+const WORD_WIDTH_CQW = 90;
 const BASE_FONT_REM = 3;
 
 /**
@@ -46,9 +46,9 @@ export function ReaderView({
     };
   }, [reader]);
 
-  const { before, anchor, after } = reader.current;
-  const longerSide = Math.max(Array.from(before).length, Array.from(after).length, 1);
-  const fontSize = `min(${BASE_FONT_REM}rem, ${SIDE_WIDTH_CQW / (LETTER_EM * longerSide)}cqw)`;
+  const { text } = reader.current;
+  const letters = Math.max(Array.from(text).length, 1);
+  const fontSize = `min(${BASE_FONT_REM}rem, ${WORD_WIDTH_CQW / (LETTER_EM * letters)}cqw)`;
 
   const hint = reader.ended ? "End of Document" : reader.playing ? "Tap to pause" : "Tap to read";
 
@@ -62,15 +62,13 @@ export function ReaderView({
       className="flex min-h-[65svh] w-full flex-col items-center justify-center gap-10 rounded-lg select-none touch-manipulation focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default"
     >
       <span className="flex w-full flex-col items-center">
-        {/* Marks of the Focus point, above and below the Anchor letter. */}
+        {/* Marks of the Focus point, above and below the centred Word. */}
         <span aria-hidden className="h-4 w-px bg-foreground/30" />
         <span
-          className="grid w-full grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-baseline py-2 font-mono leading-none whitespace-nowrap"
+          className="w-full py-2 text-center font-mono leading-none whitespace-nowrap"
           style={{ fontSize }}
         >
-          <span className="text-right">{before}</span>
-          <span className="text-red-500">{anchor}</span>
-          <span className="text-left">{after}</span>
+          {text}
         </span>
         <span aria-hidden className="h-4 w-px bg-foreground/30" />
       </span>

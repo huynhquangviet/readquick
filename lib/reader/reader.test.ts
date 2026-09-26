@@ -112,72 +112,17 @@ describe("Pause on punctuation", () => {
   });
 });
 
-describe("Anchor letter", () => {
-  function split(word: string) {
-    const { reader } = setup([word]);
-    const { before, anchor, after } = reader.current;
-    return { before, anchor, after };
-  }
-
-  it.each([
-    { word: "a", before: "", anchor: "a", after: "" },
-    { word: "to", before: "", anchor: "t", after: "o" },
-    { word: "read", before: "r", anchor: "e", after: "ad" },
-    { word: "reading", before: "re", anchor: "a", after: "ding" },
-    { word: "understanding", before: "unde", anchor: "r", after: "standing" },
-  ])("picks $anchor as the Anchor letter of $word", ({ word, ...expected }) => {
-    expect(split(word)).toEqual(expected);
-  });
-
-  it("always splits a Word into exactly one Anchor letter with the rest around it", () => {
-    for (let length = 1; length <= 40; length++) {
-      const word = "abcdefghij".repeat(4).slice(0, length);
-      const { before, anchor, after } = split(word);
-      expect(anchor).toHaveLength(1);
-      expect(before + anchor + after).toBe(word);
-      // Near the first third, so the eye lands early in the Word.
-      expect(before.length).toBeLessThanOrEqual(Math.ceil(length / 3));
-    }
-  });
-
-  it("picks a letter and keeps punctuation around it", () => {
-    expect(split("“Hello,”")).toEqual({ before: "“H", anchor: "e", after: "llo,”" });
-    expect(split("(a)")).toEqual({ before: "(", anchor: "a", after: ")" });
-  });
-
-  it.each([
-    { word: "ab..cd..ef", before: "a", anchor: "b", after: "..cd..ef" },
-    { word: "U.S.A.", before: "", anchor: "U", after: ".S.A." },
-    { word: "twenty-one", before: "tw", anchor: "e", after: "nty-one" },
-  ])("picks a letter as the Anchor of $word when it has punctuation inside", ({ word, ...expected }) => {
-    expect(split(word)).toEqual(expected);
-  });
-
-  it("keeps the Anchor on a letter whatever separators a Word has inside it", () => {
-    const chunks = ["ab", "..", "cd", "!", "ef", "—", "gh"];
-    for (let count = 1; count <= chunks.length; count++) {
-      const word = chunks.slice(0, count).join("");
-      const { before, anchor, after } = split(word);
-      expect(anchor).toMatch(/[\p{L}\p{N}]/u);
-      expect(before + anchor + after).toBe(word);
-    }
-  });
-
-  it("picks an Anchor letter for a Word with no letters", () => {
-    expect(split("—")).toEqual({ before: "", anchor: "—", after: "" });
-    expect(split("...")).toEqual({ before: "", anchor: ".", after: ".." });
-  });
-
-  it("treats accented Vietnamese letters as single letters", () => {
-    expect(split("người")).toEqual({ before: "n", anchor: "g", after: "ười" });
-    expect(split("nguoì")).toEqual({ before: "n", anchor: "g", after: "uoì" });
+describe("current Word", () => {
+  it("is the Word at the Reading position, whole and with its index", () => {
+    const { reader } = setup(["“Hello,”", "người"], { position: 1 });
+    expect(reader.current).toEqual({ index: 1, text: "người" });
   });
 
   it("follows the current Word as it changes", () => {
     const { clock, reader } = setup(["read", "reading"], { speed: 600 });
     reader.play();
     clock.advance(100);
-    expect(reader.current).toMatchObject({ index: 1, text: "reading", anchor: "a" });
+    expect(reader.current).toEqual({ index: 1, text: "reading" });
   });
 });
 

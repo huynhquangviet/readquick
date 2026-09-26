@@ -37,12 +37,8 @@ A named section of a Document that the user can jump to.
 _Avoid_: Section, part, TOC entry
 
 **Focus point**:
-The fixed position at the centre of the screen where each word appears.
+The fixed position at the centre of the screen on which each word is centred as it appears, so the eyes never have to move between words.
 _Avoid_: Centre, cursor
-
-**Anchor letter**:
-The one highlighted letter of each word. It always sits exactly on the Focus point, so the eyes never move between words.
-_Avoid_: Pivot, ORP, highlight
 
 **Pause on punctuation**:
 A word ending in punctuation, and a very long word, stays on screen longer than the base Speed gives it.

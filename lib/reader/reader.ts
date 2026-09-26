@@ -14,13 +14,10 @@ export interface ReaderOptions {
   position?: number;
 }
 
-/** The Word at the Focus point, split so the Anchor letter can sit on it. */
+/** The Word at the Focus point. */
 export interface ReaderWord {
   index: number;
   text: string;
-  before: string;
-  anchor: string;
-  after: string;
 }
 
 export type ReaderEvent =
@@ -61,30 +58,9 @@ const SENTENCE_PAUSE = 2; // . ! ? …
 const LONG_WORD_PAUSE = 1.5;
 const LONG_WORD_LETTERS = 10; // a "very long Word" has more letters than this
 
-const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
-
 function clampSpeed(wordsPerMinute: number, fallback: number) {
   if (!Number.isFinite(wordsPerMinute)) return fallback;
   return Math.min(Math.max(wordsPerMinute, MIN_SPEED), MAX_SPEED);
-}
-
-function splitAtAnchor(index: number, text: string): ReaderWord {
-  const chars = Array.from(graphemes.segment(text), (part) => part.segment);
-  const isLetter = (char: string) => /[\p{L}\p{N}]/u.test(char);
-  // The Anchor must be a letter, so the letters are counted, not the characters.
-  const letterPositions = chars.flatMap((char, position) => (isLetter(char) ? [position] : []));
-  // Around the first third of the letters, so the eye lands early in the Word.
-  const at =
-    letterPositions.length > 0
-      ? letterPositions[Math.floor((letterPositions.length - 1) / 3)]
-      : Math.floor((chars.length - 1) / 3);
-  return {
-    index,
-    text,
-    before: chars.slice(0, at).join(""),
-    anchor: chars[at],
-    after: chars.slice(at + 1).join(""),
-  };
 }
 
 const EDGE_NON_LETTERS = /^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu;
@@ -216,7 +192,7 @@ export function createReader(options: ReaderOptions): Reader {
       schedule(clock.now() - shownAt);
     },
     get current() {
-      return splitAtAnchor(position, words[position]);
+      return { index: position, text: words[position] };
     },
     play() {
       if (playing || ended) return;
