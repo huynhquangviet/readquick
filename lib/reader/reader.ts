@@ -1,3 +1,5 @@
+import { endsClause, endsSentence } from "@/lib/text/punctuation";
+
 export interface Clock {
   now(): number;
   setTimeout(callback: () => void, ms: number): unknown;
@@ -61,7 +63,8 @@ const LONG_WORD_LETTERS = 10; // a "very long Word" has more letters than this
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
-function clampSpeed(wordsPerMinute: number) {
+function clampSpeed(wordsPerMinute: number, fallback: number) {
+  if (!Number.isFinite(wordsPerMinute)) return fallback;
   return Math.min(Math.max(wordsPerMinute, MIN_SPEED), MAX_SPEED);
 }
 
@@ -85,14 +88,12 @@ function splitAtAnchor(index: number, text: string): ReaderWord {
   };
 }
 
-const CLOSERS = /[\p{Pe}\p{Pf}"'”’]+$/u;
 const EDGE_NON_LETTERS = /^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu;
 
 function displayMultiplier(word: string): number {
-  const ending = word.replace(CLOSERS, "").slice(-1);
   let multiplier = 1;
-  if (/[.!?…]/.test(ending)) multiplier = SENTENCE_PAUSE;
-  else if (/[,;:]/.test(ending)) multiplier = CLAUSE_PAUSE;
+  if (endsSentence(word)) multiplier = SENTENCE_PAUSE;
+  else if (endsClause(word)) multiplier = CLAUSE_PAUSE;
 
   const letters = Array.from(word.replace(EDGE_NON_LETTERS, "")).length;
   if (letters > LONG_WORD_LETTERS) multiplier *= LONG_WORD_PAUSE;
@@ -104,13 +105,17 @@ export function createReader(options: ReaderOptions): Reader {
   if (words.length === 0) throw new RangeError("A Reader needs at least one Word");
   const sentenceStarts = [...options.sentenceStarts].sort((a, b) => a - b);
   const lastIndex = words.length - 1;
-  let speed = clampSpeed(options.speed ?? DEFAULT_SPEED);
+  let speed = clampSpeed(options.speed ?? DEFAULT_SPEED, DEFAULT_SPEED);
   let position = Math.min(Math.max(options.position ?? 0, 0), lastIndex);
   let playing = false;
   let ended = false;
   let timer: unknown;
   // When the Word at the Focus point (re)started its display time.
   let shownAt = 0;
+  // When the Word at the Focus point is due to give way to the next one.
+  let dueAt = 0;
+  // How long the Word at the Focus point had been on screen when playback paused.
+  let shownBeforePauseMs = 0;
   // Whether the Word now at the Focus point has been counted as read yet.
   let counted = false;
   // The clock time up to which played time has been reported.
@@ -135,8 +140,8 @@ export function createReader(options: ReaderOptions): Reader {
   }
 
   // The current Word is on screen while playing: count it, once per showing.
-  function showWord() {
-    schedule();
+  function showWord(alreadyShownMs = 0) {
+    schedule(alreadyShownMs);
     if (counted) return;
     counted = true;
     reportActivity(1);
@@ -146,6 +151,8 @@ export function createReader(options: ReaderOptions): Reader {
   function schedule(alreadyShownMs = 0) {
     const duration = (60000 / speed) * displayMultiplier(words[position]);
     shownAt = clock.now() - alreadyShownMs;
+    // A Word already past its time (the Speed went up) is due now, not in the past.
+    dueAt = Math.max(shownAt + duration, clock.now());
     timer = clock.setTimeout(advance, Math.max(0, duration - alreadyShownMs));
   }
 
@@ -157,17 +164,20 @@ export function createReader(options: ReaderOptions): Reader {
       emitPlayback();
       return;
     }
-    moveTo(position + 1);
+    // A late timer must not push every later Word back: the next Word was
+    // due to start when this one was, so count the lateness towards it.
+    moveTo(position + 1, Math.max(0, clock.now() - dueAt));
   }
 
-  function moveTo(target: number) {
+  function moveTo(target: number, alreadyShownMs = 0) {
     position = target;
     ended = false;
     counted = false;
+    shownBeforePauseMs = 0;
     emit({ type: "position", position });
     if (playing) {
       clock.clearTimeout(timer);
-      showWord();
+      showWord(alreadyShownMs);
     }
   }
 
@@ -194,7 +204,7 @@ export function createReader(options: ReaderOptions): Reader {
       return speed;
     },
     setSpeed(wordsPerMinute: number) {
-      speed = clampSpeed(wordsPerMinute);
+      speed = clampSpeed(wordsPerMinute, speed);
       if (!playing) return;
       clock.clearTimeout(timer);
       schedule(clock.now() - shownAt);
@@ -207,11 +217,12 @@ export function createReader(options: ReaderOptions): Reader {
       playing = true;
       reportedAt = clock.now();
       emitPlayback();
-      showWord();
+      showWord(shownBeforePauseMs);
     },
     pause() {
       if (!playing) return;
       reportActivity(0);
+      shownBeforePauseMs = clock.now() - shownAt;
       playing = false;
       clock.clearTimeout(timer);
       emitPlayback();

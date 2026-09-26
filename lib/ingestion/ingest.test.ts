@@ -98,6 +98,24 @@ describe("Sentence detection", () => {
     ]);
   });
 
+  it("still sees an abbreviation behind an opening bracket or quote", () => {
+    expect(sentences("He met (Mr. Lee) and “Dr. Kim” today. Then left")).toEqual([
+      "He met (Mr. Lee) and “Dr. Kim” today.",
+      "Then left",
+    ]);
+  });
+
+  it("does not end a Sentence on a dotted abbreviation such as Ph.D. or e.g.", () => {
+    expect(sentences("She has a Ph.D. in physics, e.g. optics. Wow")).toEqual([
+      "She has a Ph.D. in physics, e.g. optics.",
+      "Wow",
+    ]);
+  });
+
+  it("still ends a Sentence on a short ordinary Word", () => {
+    expect(sentences("Say no. Go on. Do it")).toEqual(["Say no.", "Go on.", "Do it"]);
+  });
+
   it("does not end a Sentence on common Vietnamese abbreviations", () => {
     expect(sentences("GS. Nguyễn ở TP. Hồ Chí Minh. Ông ấy đi làm.")).toEqual([
       "GS. Nguyễn ở TP. Hồ Chí Minh.",

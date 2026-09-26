@@ -5,9 +5,14 @@ import { createReader, type ReaderEvent } from "./reader";
 
 function setup(
   words: string[],
-  options: { sentenceStarts?: number[]; speed?: number; position?: number } = {},
+  options: {
+    sentenceStarts?: number[];
+    speed?: number;
+    position?: number;
+    lateBy?: number;
+  } = {},
 ) {
-  const clock = createFakeClock();
+  const clock = createFakeClock({ lateBy: options.lateBy });
   const reader = createReader({
     words,
     sentenceStarts: options.sentenceStarts ?? [0],
@@ -89,6 +94,12 @@ describe("Pause on punctuation", () => {
   it("keeps a very long Word on screen longer than the base duration", () => {
     expect(timeOnScreen("internationalization")).toBeGreaterThan(100);
     expect(timeOnScreen("understand")).toBe(100);
+  });
+
+  it("does not treat an abbreviation as the end of a Sentence", () => {
+    expect(timeOnScreen("Mr.")).toBe(100);
+    expect(timeOnScreen("e.g.")).toBe(100);
+    expect(timeOnScreen("TP.")).toBe(100);
   });
 
   it("does not count punctuation towards a Word being very long", () => {
@@ -322,7 +333,7 @@ describe("Reading position events", () => {
   });
 
   it("emits the position after Rewind, Forward and seek, but not when nothing moved", () => {
-    const words = ["a", "b.", "c", "d."];
+    const words = ["aa", "bb.", "cc", "dd."];
     const { reader } = setup(words, { sentenceStarts: [0, 2] });
     const heard = listen(reader);
     reader.forward();
@@ -404,33 +415,33 @@ describe("Words read and time played", () => {
   });
 
   it("counts Words shown again after a Rewind", () => {
-    const words = ["a", "b.", "c", "d."];
+    const words = ["aa", "bb.", "cc", "dd."];
     const { clock, reader } = setup(words, { sentenceStarts: [0, 2], speed: 600 });
     const heard = listen(reader);
     reader.play();
-    clock.advance(100 + 200 + 100); // a, b., c shown; now on d.
+    clock.advance(100 + 200 + 100); // aa, bb., cc shown; now on dd.
     expect(reader.position).toBe(3);
     expect(heard.wordsRead()).toBe(4);
-    reader.rewind(); // back to the start of the second Sentence, "c"
+    reader.rewind(); // back to the start of the second Sentence, "cc"
     expect(reader.position).toBe(2);
     expect(heard.wordsRead()).toBe(5);
     clock.advance(100);
-    expect(heard.wordsRead()).toBe(6); // "d." again
+    expect(heard.wordsRead()).toBe(6); // "dd." again
   });
 
   it("does not count Words skipped by Forward", () => {
-    const words = ["a", "b", "c.", "d", "e", "f."];
+    const words = ["aa", "bb", "cc.", "dd", "ee", "ff."];
     const { reader } = setup(words, { sentenceStarts: [0, 3] });
     const heard = listen(reader);
     reader.play();
-    expect(heard.wordsRead()).toBe(1); // "a"
-    reader.forward(); // skips "b" and "c."
+    expect(heard.wordsRead()).toBe(1); // "aa"
+    reader.forward(); // skips "bb" and "cc."
     expect(reader.position).toBe(3);
-    expect(heard.wordsRead()).toBe(2); // just "d" on top
+    expect(heard.wordsRead()).toBe(2); // just "dd" on top
   });
 
   it("does not count Words shown by moving while paused until playback shows them", () => {
-    const words = ["a", "b.", "c", "d."];
+    const words = ["aa", "bb.", "cc", "dd."];
     const { clock, reader } = setup(words, { sentenceStarts: [0, 2], speed: 600 });
     const heard = listen(reader);
     reader.forward();
@@ -557,5 +568,81 @@ describe("seek", () => {
 describe("a Document with no Words", () => {
   it("cannot be read", () => {
     expect(() => setup([])).toThrow(RangeError);
+  });
+});
+
+describe("a busy clock", () => {
+  it("keeps to the Speed when timers fire late, instead of falling further behind", () => {
+    const words = Array.from({ length: 30 }, (_, i) => `w${i}`);
+    const { clock, reader } = setup(words, { speed: 600, lateBy: 5 }); // 100 ms a Word
+    reader.play();
+    clock.advance(2005);
+    // On time, Word 20 is due at 2000 ms (+5 late). Drifting by 5 ms a Word
+    // it would only be due at 2100 ms.
+    expect(reader.position).toBe(20);
+  });
+
+  it("does not lose played time to lateness", () => {
+    const { clock, reader } = setup(["a", "b", "c"], { speed: 600, lateBy: 7 });
+    const heard = listen(reader);
+    reader.play();
+    clock.advance(1000);
+    expect(heard.playedMs()).toBe(300 + 7);
+    expect(heard.wordsRead()).toBe(3);
+  });
+});
+
+describe("pausing and playing again", () => {
+  it("lets the Word on screen finish its display time across pauses", () => {
+    const { clock, reader } = setup(["a", "b", "c"], { speed: 100 }); // 600 ms a Word
+    reader.play();
+    clock.advance(400);
+    reader.pause();
+    clock.advance(5000);
+    reader.play();
+    clock.advance(199);
+    expect(reader.position).toBe(0);
+    clock.advance(1);
+    expect(reader.position).toBe(1);
+  });
+
+  it("still moves on when paused and played again and again", () => {
+    const { clock, reader } = setup(["a", "b", "c"], { speed: 600 });
+    reader.play();
+    for (let i = 0; i < 5; i++) {
+      clock.advance(30);
+      reader.pause();
+      reader.play();
+    }
+    expect(reader.position).toBe(1);
+  });
+
+  it("gives a Word reached by moving a full display time", () => {
+    const { clock, reader } = setup(["a", "b", "c", "d"], { speed: 600 });
+    reader.play();
+    clock.advance(60);
+    reader.pause();
+    reader.seek(2);
+    reader.play();
+    clock.advance(99);
+    expect(reader.position).toBe(2);
+    clock.advance(1);
+    expect(reader.position).toBe(3);
+  });
+});
+
+describe("a Speed that is not a number", () => {
+  it.each([NaN, Infinity, -Infinity])("is ignored: %s", (bad) => {
+    const { clock, reader } = setup(["a", "b"], { speed: 400 });
+    reader.setSpeed(bad);
+    expect(reader.speed).toBe(400);
+    reader.play();
+    clock.advance(150);
+    expect(reader.position).toBe(1);
+  });
+
+  it("falls back to the default when the starting Speed is not a number", () => {
+    const { reader } = setup(["a"], { speed: NaN });
+    expect(reader.speed).toBe(250);
   });
 });

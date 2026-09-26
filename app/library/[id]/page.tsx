@@ -11,18 +11,18 @@ async function DocumentSummary({ params }: { params: Promise<{ id: string }> }) 
 
   // Row-level security means only the owner's Document comes back.
   const supabase = await createClient();
-  const { data: document } = await supabase
+  const { data: row } = await supabase
     .from("documents")
     .select("title, word_count")
     .eq("id", id)
     .maybeSingle();
-  if (!document) notFound();
+  if (!row) notFound();
 
   return (
     <>
-      <h1 className="font-bold text-2xl">{document.title}</h1>
+      <h1 className="font-bold text-2xl">{row.title}</h1>
       <p className="text-muted-foreground">
-        {document.word_count.toLocaleString("en-US")} words
+        {row.word_count.toLocaleString("en-US")} words
       </p>
     </>
   );

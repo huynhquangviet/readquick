@@ -26,15 +26,15 @@ async function Documents() {
 
   return (
     <ul className="flex flex-col divide-y rounded-lg border">
-      {documents.map((document) => (
-        <li key={document.id}>
+      {documents.map((row) => (
+        <li key={row.id}>
           <Link
-            href={`/library/${document.id}`}
+            href={`/library/${row.id}`}
             className="flex items-baseline justify-between gap-4 p-4 hover:bg-accent"
           >
-            <span className="font-medium">{document.title}</span>
+            <span className="font-medium">{row.title}</span>
             <span className="shrink-0 text-sm text-muted-foreground">
-              {document.word_count.toLocaleString("en-US")} words
+              {row.word_count.toLocaleString("en-US")} words
             </span>
           </Link>
         </li>
