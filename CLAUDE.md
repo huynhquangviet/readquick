@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-**Product:** readquick is a phone-first web app where a signed-in user uploads a Document (PDF, EPUB, MOBI, TXT) and reads it one Word at a time at a fixed Focus point. The domain language is in `CONTEXT.md`; use those terms in code, tests and issues. The full spec is GitHub issue #1 (`gh issue view 1`). None of it is built yet.
+**Product:** readquick is a phone-first web app where a signed-in user uploads a Document (PDF, EPUB, MOBI, TXT) and reads it one Word at a time at a fixed Focus point. The domain language is in `CONTEXT.md`; use those terms in code, tests and issues. The full spec is GitHub issue #1 (`gh issue view 1`), broken into tickets #2 to #18.
 
-**Code today:** the Supabase "Next.js + Supabase Starter Kit" (`create-next-app --example with-supabase`) with its placeholder UI removed. Next.js App Router + React 19 + TypeScript (strict), Tailwind CSS 3, shadcn/ui (new-york style, Radix + lucide), Supabase Auth via cookies (`@supabase/ssr`). Signing in lands on the Library (`/library`), currently an empty state. Reading features are not built yet.
+**Code today:** the Supabase "Next.js + Supabase Starter Kit" (`create-next-app --example with-supabase`) with its placeholder UI removed. Next.js App Router + React 19 + TypeScript (strict), Tailwind CSS 3, shadcn/ui (new-york style, Radix + lucide), Supabase Auth via cookies (`@supabase/ssr`). Signing in lands on the Library (`/library`). Built so far: the Reader engine (`lib/reader/`, no UI yet) and uploading TXT Documents (Ingestion module in `lib/ingestion/`, storage, Library list, minimal Document page).
 
 ## Commands
 
@@ -35,6 +35,13 @@ Setup: copy `.env.example` to `.env.local` and set `NEXT_PUBLIC_SUPABASE_URL` an
 **Next config:** `next.config.ts` enables `cacheComponents: true` (Cache Components / PPR). Components that read request-time data such as cookies (e.g. `AuthButton`) are wrapped in `<Suspense>` at the call site. Keep that pattern when adding dynamic server components.
 
 **Env:** the Supabase env vars are required; there is no fallback when they are missing.
+
+## Modules and data
+
+- `lib/ingestion/ingest.ts`: `ingest({ bytes, filename })` returns a readable Document (title, format, Words, Sentence starts, Chapters) or a typed refusal with a user-facing message. The extension is the declared format; `SUPPORTED_FORMATS` lists what is implemented (TXT so far, extend it as formats land). The Word segmentation rule (split on whitespace) is a stable contract, because a Reading position is a Word index.
+- `lib/reader/reader.ts`: `createReader({ words, sentenceStarts, clock })`, a playback state machine on an injectable `Clock` (`lib/reader/fake-clock.ts` for tests). No UI, no storage; it emits `position`, `activity` (`playedMs`, `wordsRead` increments) and `playback` events.
+- Upload is `POST /library/upload` (`app/library/upload/route.ts`, a Route Handler, not a Server Action, so an oversized file gets our "too large" refusal instead of the Server Action body limit). It ingests, then stores the original in the private `documents` bucket at `<user id>/<document id>.<format>` and the text in `documents` and `document_texts`.
+- Schema, row-level security and storage policies live in `supabase/migrations/`. Apply them to the Supabase project (SQL editor or `supabase db push`); nothing applies them automatically.
 
 ## Conventions
 
