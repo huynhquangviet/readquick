@@ -1,5 +1,7 @@
+import { strToU8, zipSync } from "fflate";
 import { describe, expect, it } from "vitest";
 
+import { epub, type FixtureOptions } from "./epub-fixture";
 import { ingest } from "./ingest";
 
 function txt(text: string, filename = "notes.txt") {
@@ -182,5 +184,258 @@ describe("refusals", () => {
     const result = ingest({ bytes, filename: "notes.txt" });
     expect(result).toMatchObject({ ok: false, reason: "corrupt" });
     expect(!result.ok && result.message).toMatch(/could not be read/i);
+  });
+});
+
+function readableEpub(options: FixtureOptions, filename = "book.epub") {
+  const result = ingest({ bytes: epub(options), filename });
+  if (!result.ok) throw new Error(`expected a readable Document, got ${result.reason}`);
+  return result.document;
+}
+
+describe("an EPUB Document", () => {
+  it("reads its prose as Words", () => {
+    const document = readableEpub({
+      sections: [{ href: "ch1.xhtml", body: "<p>The quick <em>brown</em> fox.</p><p>It ran.</p>" }],
+    });
+    expect(document.format).toBe("epub");
+    expect(document.words).toEqual(["The", "quick", "brown", "fox.", "It", "ran."]);
+  });
+
+  it("takes its title from the EPUB metadata, or else from the file name", () => {
+    const sections = [{ href: "ch1.xhtml", body: "<p>Hello there.</p>" }];
+    expect(readableEpub({ title: "The Old Man and the Sea", sections }, "x.epub").title).toBe(
+      "The Old Man and the Sea",
+    );
+    expect(readableEpub({ sections }, "Moby Dick.epub").title).toBe("Moby Dick");
+  });
+
+  it("reads its sections in reading order and marks where Sentences start", () => {
+    const document = readableEpub({
+      sections: [
+        { href: "ch1.xhtml", body: "<p>It began. It went on.</p>" },
+        { href: "ch2.xhtml", body: "<p>Then it ended.</p>" },
+      ],
+    });
+    expect(document.words).toEqual(["It", "began.", "It", "went", "on.", "Then", "it", "ended."]);
+    expect(document.sentenceStarts).toEqual([0, 2, 5]);
+  });
+
+  it("reads a long book", () => {
+    const document = readableEpub({
+      sections: [{ href: "ch1.xhtml", body: `<p>${"word ".repeat(300_000)}</p>` }],
+    });
+    expect(document.words).toHaveLength(300_000);
+  });
+
+  it("keeps a Word whole when inline markup runs through it", () => {
+    const document = readableEpub({
+      sections: [{ href: "ch1.xhtml", body: "<p><font>T</font>he <big>old</big> man.</p>" }],
+    });
+    expect(document.words).toEqual(["The", "old", "man."]);
+  });
+
+  it("reads on past a self-closed script or style tag", () => {
+    const document = readableEpub({
+      sections: [{ href: "ch1.xhtml", body: '<script src="x.js"/><p>After the script.</p>' }],
+    });
+    expect(document.words).toEqual(["After", "the", "script."]);
+  });
+
+  it("puts a Chapter at the Word after an id that follows the last Word of a block", () => {
+    const document = readableEpub({
+      sections: [
+        { href: "ch1.xhtml", body: '<p>Start here. End.<a id="k"></a></p><h1>Next</h1><p>More.</p>' },
+      ],
+      toc: { style: "nav", entries: [{ title: "Next", href: "ch1.xhtml#k" }] },
+    });
+    expect(document.words[3]).toBe("Next");
+    expect(document.chapters).toEqual([{ title: "Next", wordIndex: 3 }]);
+  });
+
+  it("lists Chapters in reading order even if the table of contents is not", () => {
+    const document = readableEpub({
+      sections: [
+        { href: "ch1.xhtml", body: "<p>Alpha beta.</p>" },
+        { href: "ch2.xhtml", body: "<p>Gamma delta.</p>" },
+      ],
+      toc: {
+        style: "nav",
+        entries: [
+          { title: "Second", href: "ch2.xhtml" },
+          { title: "First", href: "ch1.xhtml" },
+        ],
+      },
+    });
+    expect(document.chapters.map((c) => c.title)).toEqual(["First", "Second"]);
+  });
+
+  it("opens an EPUB whose file names hold a stray percent sign", () => {
+    const document = readableEpub({
+      sections: [{ href: "100%.xhtml", body: "<p>Hello there.</p>" }],
+      toc: { style: "nav", entries: [{ title: "Half", href: "100%.xhtml#50%" }] },
+    });
+    expect(document.words).toEqual(["Hello", "there."]);
+    expect(document.chapters).toEqual([{ title: "Half", wordIndex: 0 }]);
+  });
+
+  it("leaves images, tables and other non-prose out of the Words", () => {
+    const document = readableEpub({
+      sections: [
+        {
+          href: "ch1.xhtml",
+          body: `<p>Before.</p>
+            <img src="cover.jpg" alt="A cover picture"/>
+            <table><tr><td>cell one</td><td>cell two</td></tr></table>
+            <svg xmlns="http://www.w3.org/2000/svg"><text>vector words</text></svg>
+            <script>var hidden = 1;</script><style>p { color: red }</style>
+            <p>After.</p>`,
+        },
+      ],
+    });
+    expect(document.words).toEqual(["Before.", "After."]);
+  });
+
+  it("stores an EPUB 3 table of contents as Chapters at their starting Words", () => {
+    const document = readableEpub({
+      sections: [
+        { href: "ch1.xhtml", body: "<h1>One</h1><p>Alpha beta gamma.</p>" },
+        {
+          href: "ch2.xhtml",
+          body: '<p>Delta epsilon.</p><h1 id="two">Two</h1><p>Zeta eta.</p>',
+        },
+      ],
+      toc: {
+        style: "nav",
+        entries: [
+          { title: "First", href: "ch1.xhtml" },
+          { title: "Second", href: "ch2.xhtml#two" },
+        ],
+      },
+    });
+    expect(document.words).toEqual([
+      "One", "Alpha", "beta", "gamma.", "Delta", "epsilon.", "Two", "Zeta", "eta.",
+    ]);
+    expect(document.chapters).toEqual([
+      { title: "First", wordIndex: 0 },
+      { title: "Second", wordIndex: 6 },
+    ]);
+  });
+
+  it("stores an EPUB 2 table of contents as Chapters too", () => {
+    const document = readableEpub({
+      sections: [
+        { href: "ch1.xhtml", body: "<p>Alpha beta.</p>" },
+        { href: "ch2.xhtml", body: "<p>Gamma delta.</p>" },
+      ],
+      toc: {
+        style: "ncx",
+        entries: [
+          { title: "Start", href: "ch1.xhtml" },
+          { title: "Middle", href: "ch2.xhtml" },
+        ],
+      },
+    });
+    expect(document.chapters).toEqual([
+      { title: "Start", wordIndex: 0 },
+      { title: "Middle", wordIndex: 2 },
+    ]);
+  });
+
+  it("has no Chapters when the EPUB has no table of contents", () => {
+    expect(
+      readableEpub({ sections: [{ href: "ch1.xhtml", body: "<p>Alpha beta.</p>" }] }).chapters,
+    ).toEqual([]);
+  });
+
+  it("leaves out Chapters that point nowhere or at nothing readable", () => {
+    const document = readableEpub({
+      sections: [{ href: "ch1.xhtml", body: "<p>Alpha beta.</p>" }, { href: "end.xhtml", body: "" }],
+      toc: {
+        style: "nav",
+        entries: [
+          { title: "Real", href: "ch1.xhtml" },
+          { title: "Missing", href: "gone.xhtml" },
+          { title: "Empty", href: "end.xhtml" },
+        ],
+      },
+    });
+    expect(document.chapters).toEqual([{ title: "Real", wordIndex: 0 }]);
+  });
+});
+
+const ENCRYPTION = (algorithm: string) => `<?xml version="1.0"?>
+<encryption xmlns="urn:oasis:names:tc:opendocument:xmlns:container" xmlns:enc="http://www.w3.org/2001/04/xmlenc#">
+  <enc:EncryptedData>
+    <enc:EncryptionMethod Algorithm="${algorithm}"/>
+    <enc:CipherData><enc:CipherReference URI="OEBPS/ch1.xhtml"/></enc:CipherData>
+  </enc:EncryptedData>
+</encryption>`;
+
+describe("refusing an EPUB", () => {
+  const sections = [{ href: "ch1.xhtml", body: "<p>Hello there.</p>" }];
+
+  function refusalOf(bytes: Uint8Array, filename = "book.epub") {
+    const result = ingest({ bytes, filename });
+    if (result.ok) throw new Error("expected a refusal");
+    return result;
+  }
+
+  it("refuses a DRM-protected EPUB, saying it is protected", () => {
+    const result = refusalOf(
+      epub({
+        sections,
+        files: {
+          "META-INF/encryption.xml": ENCRYPTION("http://www.w3.org/2001/04/xmlenc#aes128-cbc"),
+        },
+      }),
+    );
+    expect(result.reason).toBe("protected");
+    expect(result.message).toMatch(/protected/i);
+  });
+
+  it("refuses an EPUB with Apple FairPlay information as protected", () => {
+    const result = refusalOf(epub({ sections, files: { "META-INF/sinf.xml": "<sinf/>" } }));
+    expect(result.reason).toBe("protected");
+  });
+
+  it("refuses an EPUB with Adobe rights information as protected", () => {
+    const result = refusalOf(epub({ sections, files: { "META-INF/rights.xml": "<rights/>" } }));
+    expect(result.reason).toBe("protected");
+  });
+
+  it("refuses bytes that are not a zip archive as could not be read", () => {
+    const result = refusalOf(new TextEncoder().encode("this is not an epub"));
+    expect(result.reason).toBe("corrupt");
+    expect(result.message).toMatch(/could not be read/i);
+  });
+
+  it("refuses a zip that is not an EPUB", () => {
+    expect(refusalOf(zipSync({ "hello.txt": strToU8("hi") })).reason).toBe("corrupt");
+  });
+
+  it("refuses an EPUB with nothing readable in it", () => {
+    expect(
+      refusalOf(epub({ sections: [{ href: "ch1.xhtml", body: '<img src="a.jpg"/>' }] })).reason,
+    ).toBe("corrupt");
+  });
+
+  it("refuses an EPUB that unpacks to far more than the upload limit", () => {
+    const huge = epub({
+      sections: [{ href: "ch1.xhtml", body: `<p>${"a ".repeat(40 * 1024 * 1024)}</p>` }],
+    });
+    expect(huge.byteLength).toBeLessThan(5 * 1024 * 1024);
+    expect(refusalOf(huge).reason).toBe("corrupt");
+  });
+
+  it("opens an EPUB whose only encrypted parts are obfuscated fonts", () => {
+    const result = ingest({
+      bytes: epub({
+        sections,
+        files: { "META-INF/encryption.xml": ENCRYPTION("http://www.idpf.org/2008/embedding") },
+      }),
+      filename: "book.epub",
+    });
+    expect(result.ok).toBe(true);
   });
 });

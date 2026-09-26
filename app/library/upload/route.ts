@@ -25,7 +25,13 @@ const REFUSAL_STATUS = {
   "too-large": 413,
   "unsupported-format": 415,
   corrupt: 422,
+  protected: 422,
 } as const;
+
+const DEFAULT_CONTENT_TYPE: Record<string, string> = {
+  txt: "text/plain",
+  epub: "application/epub+zip",
+};
 
 function refused({ reason, message }: Refusal) {
   return NextResponse.json({ reason, message }, { status: REFUSAL_STATUS[reason] });
@@ -153,7 +159,7 @@ export async function POST(request: Request) {
 
   const saved = await saveDocument(supabase, userId, result.document, {
     bytes,
-    contentType: file.type || "text/plain",
+    contentType: file.type || DEFAULT_CONTENT_TYPE[result.document.format] || "application/octet-stream",
     hash,
   });
   switch (saved.status) {

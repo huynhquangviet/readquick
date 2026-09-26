@@ -1,5 +1,8 @@
 import { endsSentence } from "@/lib/text/punctuation";
 
+import { readEpub } from "./epub";
+import { toWords } from "./words";
+
 export interface IngestInput {
   bytes: Uint8Array;
   /** The extension of the file name is the declared format. */
@@ -22,7 +25,7 @@ export interface IngestedDocument {
   chapters: Chapter[];
 }
 
-export type RefusalReason = "too-large" | "unsupported-format" | "corrupt";
+export type RefusalReason = "too-large" | "unsupported-format" | "corrupt" | "protected";
 
 export type Refusal = { ok: false; reason: RefusalReason; message: string };
 
@@ -30,26 +33,17 @@ export type IngestResult = { ok: true; document: IngestedDocument } | Refusal;
 
 export const MAX_FILE_BYTES = 5 * 1024 * 1024;
 
-const SUPPORTED_FORMATS = ["txt"];
+const SUPPORTED_FORMATS = ["txt", "epub"];
 
 const REFUSALS = {
   "too-large": "This Document is too large. The limit is 5MB.",
   "unsupported-format": `This Document's format is not supported. Supported formats: ${SUPPORTED_FORMATS.map((f) => f.toUpperCase()).join(", ")}.`,
   corrupt: "This Document could not be read. It may be damaged or empty; try another copy.",
+  protected: "This Document is protected (DRM) and cannot be opened. Try a copy without protection.",
 } satisfies Record<RefusalReason, string>;
 
 export function refusal(reason: RefusalReason): Refusal {
   return { ok: false, reason, message: REFUSALS[reason] };
-}
-
-/**
- * Cuts text into Words on whitespace. This is a stable contract: a Reading
- * position is a Word index, so changing this rule would shift every saved
- * position. Each Vietnamese syllable is its own Word because syllables are
- * separated by spaces.
- */
-function toWords(text: string): string[] {
-  return text.split(/\s+/u).filter((word) => word !== "");
 }
 
 function toSentenceStarts(words: string[]): number[] {
@@ -83,18 +77,21 @@ export function ingest({ bytes, filename }: IngestInput): IngestResult {
   const format = formatOf(filename);
   if (!format || !SUPPORTED_FORMATS.includes(format)) return refusal("unsupported-format");
 
-  const text = decodeText(bytes);
-  const words = text === undefined ? [] : toWords(text);
+  const content = format === "epub" ? readEpub(bytes) : undefined;
+  const text = format === "epub" ? undefined : decodeText(bytes);
+  if (content === "protected") return refusal("protected");
+  const words =
+    typeof content === "object" ? content.words : text === undefined ? [] : toWords(text);
   if (words.length === 0) return refusal("corrupt");
 
   return {
     ok: true,
     document: {
-      title: titleFrom(filename),
+      title: (typeof content === "object" && content.title) || titleFrom(filename),
       format,
       words,
       sentenceStarts: toSentenceStarts(words),
-      chapters: [],
+      chapters: typeof content === "object" ? content.chapters : [],
     },
   };
 }
