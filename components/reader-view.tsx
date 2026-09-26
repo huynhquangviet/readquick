@@ -9,6 +9,7 @@ import { createActivityWriter } from "@/lib/reader/activity-store";
 import { pauseWhenHidden } from "@/lib/reader/auto-pause";
 import { currentChapter, parseChapters } from "@/lib/reader/chapters";
 import { createHoldRepeat, type HoldRepeat } from "@/lib/reader/hold-repeat";
+import { browserTimeZone } from "@/lib/reader/local-date";
 import { readerKeyAction } from "@/lib/reader/keyboard";
 import { createPositionSaver } from "@/lib/reader/position-saver";
 import { createPositionWriter } from "@/lib/reader/position-store";
@@ -156,7 +157,7 @@ export function ReaderView({
       reader,
       clock: browserClock,
       wallNow: () => Date.now(),
-      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      timeZone: browserTimeZone(),
       record: createActivityWriter(supabase),
     });
     // Play time and Words read would overstate the reading if a hidden tab kept playing.

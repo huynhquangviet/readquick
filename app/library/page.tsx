@@ -4,6 +4,7 @@ import { Suspense } from "react";
 
 import { DeleteDocument } from "@/components/delete-document";
 import { UploadDocument } from "@/components/upload-document";
+import { Button } from "@/components/ui/button";
 import { lastReadLabel, percentRead } from "@/lib/library/summary";
 import { firstRelated } from "@/lib/supabase/related";
 import { createClient } from "@/lib/supabase/server";
@@ -75,7 +76,12 @@ export default function LibraryPage() {
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between gap-4">
         <h1 className="font-bold text-2xl">Library</h1>
-        <UploadDocument />
+        <div className="flex items-center gap-2">
+          <Button asChild variant="outline" size="sm">
+            <Link href="/library/stats">Stats</Link>
+          </Button>
+          <UploadDocument />
+        </div>
       </div>
       <Suspense fallback={<p className="text-sm text-muted-foreground">Loading…</p>}>
         <Documents />
